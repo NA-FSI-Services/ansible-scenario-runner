@@ -24,12 +24,13 @@ class HelperTests(unittest.TestCase):
             self.env.pop(key, None)
         self.env['MOCK_API_HOST'] = '127.0.0.1'
 
-    def run_script(self, path, *args):
-        return subprocess.run(['bash', str(self.harness / path), *args],
+    def run_script(self, path, *args, trace=False):
+        command = ['bash', '-x'] if trace else ['bash']
+        return subprocess.run([*command, str(self.harness / path), *args],
                               env=self.env, capture_output=True, text=True, timeout=15)
 
     def api(self, action):
-        return self.run_script('mock_api/manage.sh', action)
+        return self.run_script('mock_api/manage.sh', action, trace=True)
 
     def free_port(self):
         with socket.socket() as sock:
@@ -42,7 +43,10 @@ class HelperTests(unittest.TestCase):
         for action in ('start', 'status', 'start', 'restart', 'stop', 'stop'):
             with self.subTest(action=action):
                 result = self.api(action)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                if result.returncode:
+                    log = self.harness / 'mock_api/.mock_api.log'
+                    server_output = log.read_text()[-6000:] if log.exists() else ''
+                    self.fail(result.stdout + result.stderr[-6000:] + server_output)
         self.assertNotEqual(self.api('status').returncode, 0)
         self.assertFalse((self.harness / 'mock_api/.mock_api.ready').exists())
 
