@@ -21,6 +21,7 @@ homepage: "https://github.com/slibonati/ansible-scenario-runner"
 issues: "https://github.com/slibonati/ansible-scenario-runner/issues"
 build_ignore:
   - .git
+  - .github
   - .gitignore
   - .venv
   - 'roles/*/tests/vault.yml'
@@ -30,3 +31,4 @@ build_ignore:
   - '**/__pycache__'
   - '*.tar.gz'
   - ansible-navigator.log
+  - '**/ansible-navigator.log'

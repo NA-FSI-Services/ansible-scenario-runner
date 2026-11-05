@@ -160,6 +160,42 @@ class HelperTests(unittest.TestCase):
         self.assertNotIn('New vault password:', output)
         self.assertNotIn('Confirm vault password:', output)
 
+    @unittest.skipUnless(shutil.which('ansible-vault'), 'ansible-vault required')
+    def test_existing_vault_password_is_verified_and_failed_setup_can_be_retried(self):
+        vault = self.harness / 'vault.yml'
+        password = self.harness / '.vault_pass'
+        vault.write_text('api_token: vault-content-sentinel\n')
+        password.write_text('correct-password\n')
+        result = subprocess.run(['ansible-vault', 'encrypt', str(vault),
+                                 '--vault-password-file', str(password)],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        encrypted = vault.read_bytes()
+        password.unlink()
+
+        self.env['VAULT_PASS'] = 'wrong-password'
+        result = self.run_script('setup-vault.sh')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('could not decrypt', result.stderr)
+        self.assertFalse(password.exists())
+        self.assertEqual(vault.read_bytes(), encrypted)
+
+        # A pre-existing password file belongs to the user; retain it on failure.
+        password.write_text('wrong-password\n')
+        result = self.run_script('setup-vault.sh')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(password.read_text(), 'wrong-password\n')
+        password.unlink()
+
+        self.env['VAULT_PASS'] = 'correct-password'
+        result = self.run_script('setup-vault.sh')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('password verified', result.stdout)
+        self.assertNotIn('vault-content-sentinel', result.stdout + result.stderr)
+        self.assertNotIn('correct-password', result.stdout + result.stderr)
+        self.assertEqual(vault.read_bytes(), encrypted)
+        self.assertEqual(password.stat().st_mode & 0o777, 0o600)
+
     def test_encryption_failure_leaves_only_private_files(self):
         self.vault_stub('exit 1\n')
         result = self.run_script('setup-vault.sh', '--demo')

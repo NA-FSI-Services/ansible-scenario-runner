@@ -24,15 +24,25 @@ flock -n 9 || { echo "another mock API lifecycle command is running" >&2; exit 1
 
 pid=""
 instance=""
+
 is_running() {
   local args state
   [[ -f "$PID_FILE" ]] || return 1
   read -r pid instance <"$PID_FILE" || return 1
   [[ "$pid" =~ ^[1-9][0-9]*$ && "$instance" =~ ^[a-f0-9]{32}$ ]] || return 1
+
   args="$(ps -ww -p "$pid" -o args=)" || return 1
   state="$(ps -p "$pid" -o stat=)" || return 1
-  [[ "$state" != *Z* && "$args" == "python3 $SCRIPT_DIR/server.py --instance $instance" ]]
+
+  # Reject zombie processes
+  [[ "$state" != *Z* ]] || return 1
+
+  # Support Linux and macOS Python executable paths
+  [[ "$args" == "python3 $SCRIPT_DIR/server.py --instance $instance" ||
+     "$args" == *"/Python $SCRIPT_DIR/server.py --instance $instance" ||
+     "$args" == *"/python3 $SCRIPT_DIR/server.py --instance $instance" ]]
 }
+
 
 stop() {
   if ! is_running; then

@@ -1,0 +1,7 @@
+---
+# Verify the missing endpoint returns HTTP 404 and the expected error body.
+api_path: /v1/does-not-exist
+api_method: GET
+api_expected_status: 404
+api_message_field: error
+api_expected_message: not_found

@@ -1,0 +1,9 @@
+---
+# Verify the API rejects a request without a Bearer header.
+api_path: /v1/message
+api_method: GET
+api_headers:
+  Authorization: ""
+api_expected_status: 401
+api_message_field: error
+api_expected_message: missing_bearer

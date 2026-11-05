@@ -21,6 +21,8 @@ scenarios:
   - name: happy-path
   - name: echo-payload
   - name: health-no-auth
+  - name: unauthorized
+  - name: not-found
   - name: unknown-path
     expected_failure: true
   - name: happy-path-check

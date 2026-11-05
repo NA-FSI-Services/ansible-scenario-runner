@@ -46,10 +46,10 @@ Role FQCN: `demo.scenarios.api_client`
 ## Prerequisites
 
 Install the [framework prerequisites](../README.md#prerequisites). This demo also
-uses Python 3 for the mock server, `curl` for its health check, and the Linux
-utilities `flock` (util-linux) and `ps` for lifecycle locking and process checks. The execution
-environment reaches the host mock API through host networking, configured by
-`NAVIGATOR_CONTAINER_OPTIONS` in `env.sh`.
+uses Python 3 for the mock server, `curl` for its health check, and `flock`
+(util-linux) and `ps` for lifecycle locking and process checks. On macOS, install
+`flock` with `brew install flock`; `ps` is included with macOS. Container
+networking is configured by `NAVIGATOR_CONTAINER_OPTIONS` in `env.sh`.
 
 The playbook loads the role by path, so collection installation is optional.
 Start from the repository root after cloning (see [Start here](../README.md#start-here)).
@@ -68,10 +68,10 @@ command -v flock ps
 podman info  # use docker info if Docker is your configured engine
 ```
 
-The bundled networking setup assumes the execution environment can reach the
-host's `127.0.0.1:8765` through `--network=host`. If your container engine runs
-inside a VM, that address may refer to the VM rather than your workstation;
-adapt the networking and API address before running the scenarios.
+On Linux, the default `--network=host` lets the execution environment reach
+the host's `127.0.0.1:8765`. On macOS, the default leaves the container network
+unchanged and selects the container-facing URL described below. Explicitly setting
+`NAVIGATOR_CONTAINER_OPTIONS` (including an empty value) overrides either default.
 
 The default execution environment image is `quay.io/ansible/creator-ee:latest`.
 The first run may need to pull it. To use an image already available in your
@@ -80,6 +80,45 @@ Ansible dependencies needed by the role.
 
 Navigator starts the execution environment through your configured container
 engine; you do not need to start the container separately.
+
+### macOS with Homebrew and Podman
+
+Start your Podman machine (`podman machine start` if it is stopped). Podman runs
+containers in a Linux VM, so container loopback and `--network=host` refer to that
+VM. Use Podman's [host hostname](https://docs.podman.io/en/latest/markdown/podman-run.1.html#add-host-hostname-ip)
+to reach the Mac. Keep the mock API bound to `127.0.0.1`; there is no need to
+expose it on `0.0.0.0` or change the vault's loopback URL.
+
+After starting the mock API and setting up the vault below, run from
+`roles/api_client/tests/`:
+
+```bash
+./run.sh happy-path
+./run-all.sh
+```
+
+On macOS, `env.sh` automatically defaults `API_BASE_URL` to
+`http://host.containers.internal:8765` (or the port in `MOCK_API_PORT` if set).
+The runner passes this as an Ansible `api_base_url` extra-var after the vault, so
+it takes precedence over the vault URL without modifying the vault file.
+Set `API_BASE_URL` to use another address, or set it to an empty value to use
+your vault/role/scenario URL: `API_BASE_URL= ./run.sh happy-path`.
+Linux keeps its existing URL behavior. Direct host
+`ansible-playbook` execution below continues to use the vault's `127.0.0.1` URL.
+For a manual Navigator command, pass
+`-e api_base_url=http://host.containers.internal:8765` after `-e @vault.yml`.
+
+The runner automatically handles macOS launchd SSH agent sockets that cannot be
+mounted in the Podman VM, while preserving other agent sockets. No manual socket
+configuration is needed for this demo. Set `NAVIGATOR_KEEP_SSH_AUTH_SOCK=1` only
+if your container engine supports forwarding the launchd socket.
+
+To check connectivity independently of Ansible (using an already pulled EE):
+
+```bash
+podman run --rm --pull=never quay.io/ansible/creator-ee:latest python3 -c \
+  'import urllib.request; print(urllib.request.urlopen("http://host.containers.internal:8765/health", timeout=5).read().decode())'
+```
 
 ## Tested environment
 
@@ -138,7 +177,9 @@ creating credential files; run it again to retry.
 
 Later runs reuse `.vault_pass` without prompting. If an encrypted `vault.yml`
 already exists but `.vault_pass` is missing, the script asks for that vault's
-existing password instead.
+existing password instead. Setup verifies that the password decrypts the vault.
+If verification fails, it removes a password file created during that attempt
+so you can retry; a pre-existing password file is retained for correction.
 
 Manual equivalent, from the same tests directory:
 
@@ -171,6 +212,8 @@ change it. To use the current demo default, run
 ./run.sh happy-path 2
 ./run.sh echo-payload -vv
 ./run.sh scenarios/health-no-auth.yml
+./run.sh unauthorized
+./run.sh not-found
 ./run.sh happy-path-check
 ```
 
@@ -179,6 +222,8 @@ change it. To use the current demo default, run
 | `happy-path` | Validate the authenticated message response |
 | `echo-payload` | POST a JSON body and validate the response |
 | `health-no-auth` | Exercise the public health endpoint |
+| `unauthorized` | Require HTTP 401 and `missing_bearer` when the Bearer header is omitted |
+| `not-found` | Require HTTP 404 and `not_found` for a missing endpoint |
 | `unknown-path` | Request a missing endpoint while the role expects HTTP 200; the suite expects failure |
 | `happy-path-check` | Apply native check mode to the role |
 
@@ -187,6 +232,11 @@ Each run starts the role with an **API client configuration** banner showing
 followed by the check-mode boolean, scenario, request URL,
 HTTP method, and expected status. It does not print the API token, headers, or
 request body.
+
+The HTTP request task uses `no_log` to protect credentials even at higher
+verbosity. Request failures report the HTTP status and expected status without
+printing request headers; status `-1` means no HTTP response was received.
+Successful response summaries still include the API's JSON response.
 
 The check-mode scenario sets `scenario_check_mode: true` in its own YAML file.
 Ansible skips the `uri` request in check mode. The role also skips response
@@ -205,6 +255,10 @@ EXPECTED_FAILURE=1 ./run.sh unknown-path
 Running `./run.sh unknown-path` without that setting returns failure, because
 single runs do not read the manifest.
 
+The `unauthorized` and `not-found` scenarios validate exact HTTP responses through
+ordinary Ansible assertions. They fail on connection errors or unexpected status
+codes and do not use `expected_failure`.
+
 ### 4. Run the suite and review evidence
 
 ```bash
@@ -217,7 +271,7 @@ scenarios, execution image, and log directory. No credential values are shown.
 The banner is also captured in the suite summary log.
 
 The second command removes existing `logs/*.log` before running. The suite
-includes all five scenarios above. `unknown-path` passes when the command exits
+includes all seven scenarios above. `unknown-path` passes when the command exits
 nonzero. This does not verify why it failed: inspect its log for the expected
 HTTP 404 rather than a connection, authentication, or container error.
 The suite summary shows the actual outcomes, marking the expected failure:
@@ -226,10 +280,12 @@ The suite summary shows the actual outcomes, marking the expected failure:
 PASS happy-path
 PASS echo-payload
 PASS health-no-auth
+PASS unauthorized
+PASS not-found
 FAIL unknown-path (expected)
 PASS happy-path-check
 
-passed=4 failed=1
+passed=6 failed=1
 ```
 
 The failed run remains visible in the count. The suite returns exit status 0
@@ -246,7 +302,37 @@ as a pass because only the command exit status is checked.
 See the [runner reference](../README.md#running-tests-and-reading-results) for
 verbosity, environment overrides, logging, and direct Ansible invocation.
 
-### 5. Stop the mock API
+### 5. Run a scenario with plain Ansible (without the runner)
+
+The runner scripts are optional. The same test playbook, inventory, and scenario
+variables can be used directly with `ansible-playbook`. This does **not** invoke
+`run.sh`, `run-all.sh`, or `ansible-navigator`.
+
+With the mock API still running and the vault configured, from
+`roles/api_client/tests/` execute:
+
+```bash
+ansible-playbook -i inventory.yml test.yml \
+  --vault-password-file .vault_pass \
+  -e @vault.yml \
+  -e scenario_vars=scenarios/happy-path.yml
+```
+
+- **Playbook:** `test.yml` loads the selected scenario and invokes the role.
+- **Inventory:** `inventory.yml` supplies the target (localhost in this demo).
+- **Vault:** `.vault_pass` decrypts `vault.yml`, which supplies the API credentials.
+- **Scenario:** `scenario_vars` points to the scenario's inputs and expected values.
+
+Change `scenarios/happy-path.yml` to another scenario file to run a different
+case. Normal Ansible failures return a nonzero exit status; the runner's
+`expected_failure: true` handling does not apply to this direct command.
+
+Direct execution requires `ansible-playbook` and the role's dependencies installed
+on the host; the execution environment image is not used. The underlying role
+and assertions remain the same, but you do not get the runner's timestamped logs,
+ordered suite execution, or suite-level summaries.
+
+### 6. Stop the mock API
 
 From the tests directory:
 
@@ -268,6 +354,7 @@ checkout with the mock API still running, stop it with the old launcher first.
 | `api_path` | `/v1/message` | Path appended to base URL |
 | `api_method` | `GET` | HTTP method |
 | `api_body` | `{}` | JSON body (non-GET) |
+| `api_headers` | `{}` | Additional headers; values override the default Bearer header |
 | `api_expected_status` | `200` | Passed to `uri` `status_code` |
 | `api_message_field` | `message` | JSON field to assert when expected message set |
 | `api_expected_message` | `""` | If non-empty, assert field equals this |

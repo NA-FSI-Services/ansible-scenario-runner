@@ -255,7 +255,7 @@ failures. The summary counts successful runs as `passed` and failed runs as
 `PASS <name> (unexpected—failure expected)` and still counts as passed.
 Runner errors are labelled `FAIL <name> (runner error)` and count as failed.
 The suite returns nonzero if a result differs from its expected outcome or a
-runner error occurs. Thus the demo reports `passed=4 failed=1` and exits
+runner error occurs. Thus the demo reports `passed=6 failed=1` and exits
 successfully because its one failure was expected.
 
 The entire manifest is validated before
@@ -270,7 +270,7 @@ and manifest entries to expand regression coverage without changing the scripts.
 | --- | --- |
 | `PLAYBOOK`, `INVENTORY` | Test playbook and target inventory |
 | `VAULT_FILE` | Encrypted variables file |
-| `ANSIBLE_VAULT_PASSWORD_FILE` | Local password-file path, default `.vault_pass` |
+| `ANSIBLE_VAULT_PASSWORD_FILE` | Password-file path; relative overrides resolve from the caller's directory |
 | `EE_IMAGE` | Execution environment image |
 | `LOGS_DIR` | Output directory, default `logs/` |
 | `LOG_FILE` | Explicit single-run log path |
@@ -321,29 +321,14 @@ redact secrets. Console output remains unchanged.
 
 ### Direct Ansible invocation
 
-The wrappers provide execution defaults and evidence capture. From a configured
-role's tests directory, the equivalent direct invocation is:
+Use `./run.sh baseline` for Navigator execution with the runner's platform,
+mount, and logging settings. If the host has Ansible and the role's dependencies,
+you can run the playbook directly from your role's tests directory:
 
 ```bash
-source ./env.sh
-ansible-navigator run "$PLAYBOOK" -i "$INVENTORY" \
-  --eei "$EE_IMAGE" --pp "$EE_PULL_POLICY" \
-  --mode stdout --pae false \
-  --eev "$(cd "$TESTS_DIR/.." && pwd):$(cd "$TESTS_DIR/.." && pwd):Z" \
-  --co=--network=host \
-  --vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE" \
-  -e @"$VAULT_FILE" \
-  -e scenario_vars=scenarios/baseline.yml
-```
-
-Adjust the container options for your environment. If the host has Ansible and
-all required dependencies, you can also run the playbook directly:
-
-```bash
-source ./env.sh
-ansible-playbook -i "$INVENTORY" "$PLAYBOOK" \
-  --vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE" \
-  -e @"$VAULT_FILE" \
+ansible-playbook -i inventory.yml test.yml \
+  --vault-password-file .vault_pass \
+  -e @vault.yml \
   -e scenario_vars=scenarios/baseline.yml
 ```
 
@@ -416,3 +401,7 @@ using a stub navigator. Packaging tests verify that local credentials and
 runtime logs are excluded from collection archives. Helper tests exercise mock
 API lifecycle handling, vault file permissions, and unique log allocation.
 The lifecycle tests require `flock`, `ps`, and `curl`, as does the demo launcher.
+
+GitHub Actions runs these tests on Linux and macOS with Ansible Core 2.16 and
+a current release. CI uses a stub Navigator and real host Ansible; the live
+Podman execution environment is checked separately with the demo suite.

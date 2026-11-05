@@ -26,16 +26,25 @@
       run ./setup-vault.sh (encrypts vault.yml), then pass
       -e @vault.yml with --vault-password-file .vault_pass
 
-- name: Call authenticated API
-  ansible.builtin.uri:
-    url: "{{ api_base_url }}{{ api_path }}"
-    method: "{{ api_method }}"
-    headers: "{{ {'Authorization': 'Bearer ' ~ api_token} | combine(api_headers) }}"
-    body: "{{ api_body if api_method | upper != 'GET' else omit }}"
-    body_format: "{{ 'json' if api_method | upper != 'GET' else omit }}"
-    status_code: "{{ api_expected_status }}"
-    return_content: true
-  register: api_response
+- name: Request API with protected credentials
+  block:
+    - name: Call authenticated API
+      ansible.builtin.uri:
+        url: "{{ api_base_url }}{{ api_path }}"
+        method: "{{ api_method }}"
+        headers: "{{ {'Authorization': 'Bearer ' ~ api_token} | combine(api_headers) }}"
+        body: "{{ api_body if api_method | upper != 'GET' else omit }}"
+        body_format: "{{ 'json' if api_method | upper != 'GET' else omit }}"
+        status_code: "{{ api_expected_status }}"
+        return_content: true
+      register: api_response
+      no_log: true
+  rescue:
+    - name: Report API request failure
+      ansible.builtin.fail:
+        msg: >-
+          API request failed: HTTP status {{ api_response.status | default(-1) | int }};
+          expected {{ api_expected_status }}. Status -1 means no HTTP response was received.
 
 - name: Explain skipped API request
   ansible.builtin.debug:

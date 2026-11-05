@@ -10,6 +10,7 @@
 #
 # Playbook / inventory / vault / EE come from env.sh. Override with env vars:
 #   PLAYBOOK=... INVENTORY=... VAULT_FILE=... EE_IMAGE=... ./run.sh happy-path
+#   API_BASE_URL=http://host.containers.internal:8765 ./run.sh happy-path
 #
 # EXPECTED_FAILURE=1 accepts any nonzero navigator exit; it does not check the cause.
 # Logging: stdout/stderr shown on console; sanitized copy under logs/
@@ -107,15 +108,15 @@ verbosity_to_flag() {
   esac
 }
 
-INVENTORY="$(resolve_under_tests "${INVENTORY:-${TESTS_DIR}/inventory.yml}")"
-PLAYBOOK="$(resolve_under_tests "${PLAYBOOK:-${TESTS_DIR}/test.yml}")"
-VAULT="$(resolve_under_tests "${VAULT_FILE:-${TESTS_DIR}/vault.yml}")"
-VAULT_PASS_FILE="${ANSIBLE_VAULT_PASSWORD_FILE:-${TESTS_DIR}/.vault_pass}"
-EE_IMAGE="${EE_IMAGE:-quay.io/ansible/creator-ee:latest}"
-EE_PULL_POLICY="${EE_PULL_POLICY:-missing}"
-# Host network so the EE can reach the mock API on the host (127.0.0.1).
-# Override or clear: NAVIGATOR_CONTAINER_OPTIONS= ./run.sh happy-path
-NAVIGATOR_CONTAINER_OPTIONS="${NAVIGATOR_CONTAINER_OPTIONS---network=host}"
+INVENTORY="$(resolve_under_tests "$INVENTORY")"
+PLAYBOOK="$(resolve_under_tests "$PLAYBOOK")"
+VAULT="$(resolve_under_tests "$VAULT_FILE")"
+VAULT_PASS_FILE="$ANSIBLE_VAULT_PASSWORD_FILE"
+# Ansible resolves relative password paths from the caller's working directory.
+# Preserve that location when the runner changes to TESTS_DIR below.
+if [[ "$VAULT_PASS_FILE" != /* ]]; then
+  VAULT_PASS_FILE="$PWD/$VAULT_PASS_FILE"
+fi
 case "${EXPECTED_FAILURE:-0}" in
   0|false|FALSE) EXPECTED_FAILURE=0 ;;
   1|true|TRUE) EXPECTED_FAILURE=1 ;;
@@ -214,6 +215,22 @@ cmd=(
   -e @"$VAULT"
   -e "scenario_vars=${SCENARIO_VARS_REL}"
 )
+# Container-facing address (defaulted on macOS in env.sh), after the vault so it
+# takes precedence. An explicit empty API_BASE_URL uses the role/vault/scenario URL.
+if [[ -n "${API_BASE_URL:-}" ]]; then
+  cmd+=(-e "api_base_url=${API_BASE_URL}")
+fi
+# macOS launchd agent sockets cannot be bind-mounted into the Podman VM.
+# Scope the opt-out to Navigator; preserve other sockets and allow an override
+# for engines configured to make this socket available.
+if [[ "$(uname -s)" == Darwin && "${NAVIGATOR_KEEP_SSH_AUTH_SOCK:-0}" != 1 ]]; then
+  case "${SSH_AUTH_SOCK:-}" in
+    /var/run/com.apple.launchd.*/Listeners|/tmp/com.apple.launchd.*/Listeners|/private/tmp/com.apple.launchd.*/Listeners)
+      echo "Omitting macOS launchd SSH agent socket for Navigator (NAVIGATOR_KEEP_SSH_AUTH_SOCK=1 to retain)." >&2
+      cmd=(env -u SSH_AUTH_SOCK "${cmd[@]}")
+      ;;
+  esac
+fi
 
 rc=0
 set +e

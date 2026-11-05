@@ -21,6 +21,7 @@ EXAMPLE="${TESTS_DIR}/vault.example.yml"
 VAULT="${TESTS_DIR}/vault.yml"
 PASS_FILE="${TESTS_DIR}/.vault_pass"
 DEMO=0
+CREATED_PASS_FILE=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -95,6 +96,7 @@ if [[ ! -f "$PASS_FILE" ]]; then
     exit 1
   fi
   chmod 600 "$PASS_FILE"
+  CREATED_PASS_FILE=1
   echo "wrote $PASS_FILE (gitignored)"
 else
   echo "using existing $PASS_FILE"
@@ -106,7 +108,17 @@ if [[ ! -f "$VAULT" ]]; then
 fi
 
 if head -n1 "$VAULT" | grep -q '^\$ANSIBLE_VAULT'; then
-  echo "vault.yml is already ansible-vault encrypted"
+  if ! ansible-vault view "$VAULT" --vault-password-file "$PASS_FILE" >/dev/null; then
+    echo "could not decrypt vault.yml with $PASS_FILE" >&2
+    if [[ "$CREATED_PASS_FILE" == 1 ]]; then
+      rm -f "$PASS_FILE"
+      echo "removed the new password file; retry with the existing vault password" >&2
+    else
+      echo "correct the existing password file before retrying" >&2
+    fi
+    exit 1
+  fi
+  echo "vault.yml is already encrypted; password verified"
   exit 0
 fi
 
