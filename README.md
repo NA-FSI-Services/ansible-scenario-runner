@@ -37,7 +37,7 @@ capture. This runner is not intended to replace Molecule where it is a good fit.
 ## Start here
 
 ```bash
-git clone https://github.com/slibonati/ansible-scenario-runner.git
+git clone https://github.com/NA-FSI-Services/ansible-scenario-runner.git
 cd ansible-scenario-runner
 ```
 
