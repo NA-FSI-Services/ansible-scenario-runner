@@ -34,4 +34,15 @@ jobs:
             bash -n "$script"
           done
       - name: Run regression tests
-        run: python -m unittest discover -s runner_tests -v
+        shell: python
+        run: |
+          import sys
+          import unittest
+
+          suite = unittest.defaultTestLoader.discover('runner_tests')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          for test, traceback in result.failures + result.errors:
+              message = f'{test}\n{traceback}'
+              message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error title=Regression test failure::{message}', flush=True)
+          sys.exit(not result.wasSuccessful())
