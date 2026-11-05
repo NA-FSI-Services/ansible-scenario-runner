@@ -26,7 +26,7 @@ pid=""
 instance=""
 
 is_running() {
-  local args state
+  local args state server_args executable
   [[ -f "$PID_FILE" ]] || return 1
   read -r pid instance <"$PID_FILE" || return 1
   [[ "$pid" =~ ^[1-9][0-9]*$ && "$instance" =~ ^[a-f0-9]{32}$ ]] || return 1
@@ -37,12 +37,12 @@ is_running() {
   # Reject zombie processes
   [[ "$state" != *Z* ]] || return 1
 
-  # Support Linux and macOS Python executable paths
-  [[ "$args" == "python3 $SCRIPT_DIR/server.py --instance $instance" ||
-     "$args" == *"/Python $SCRIPT_DIR/server.py --instance $instance" ||
-     "$args" == *"/python3 $SCRIPT_DIR/server.py --instance $instance" ]]
+  # Match the script and instance exactly, including with versioned Python paths.
+  server_args=" $SCRIPT_DIR/server.py --instance $instance"
+  [[ "$args" == *"$server_args" ]] || return 1
+  executable="${args%"$server_args"}"
+  [[ "${executable##*/}" =~ ^(Python|python3(\.[0-9]+)?)$ ]]
 }
-
 
 stop() {
   if ! is_running; then

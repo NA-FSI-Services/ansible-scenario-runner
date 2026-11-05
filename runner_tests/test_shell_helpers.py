@@ -59,6 +59,35 @@ class HelperTests(unittest.TestCase):
             proc.terminate()
             proc.wait()
 
+    def test_process_identity_accepts_versioned_python_and_rejects_mismatches(self):
+        bins = self.root / 'bin'
+        bins.mkdir()
+        ps = bins / 'ps'
+        ps.write_text('''#!/bin/sh
+case "$*" in
+  *args=*) printf '%s\\n' "$PROBE_PROCESS_ARGS" ;;
+  *) printf '%s\\n' "${PROBE_PROCESS_STATE:-S}" ;;
+esac
+''')
+        ps.chmod(0o755)
+        self.env['PATH'] = str(bins) + ':' + self.env['PATH']
+        instance = 'a' * 32
+        (self.harness / 'mock_api/.mock_api.pid').write_text(f'12345 {instance}\n')
+        server_args = f'{self.harness}/mock_api/server.py --instance {instance}'
+        for executable in ('python3', '/usr/bin/python3', '/opt/python/bin/python3.12',
+                           '/Library/Python.framework/Versions/3.13/Python'):
+            with self.subTest(executable=executable):
+                self.env['PROBE_PROCESS_ARGS'] = f'{executable} {server_args}'
+                self.assertEqual(self.api('status').returncode, 0)
+        for args in (f'other {server_args}', f'python3 {server_args} --extra',
+                     f'python3 {server_args[:-1]}b', f'python3 {self.root}/other.py --instance {instance}'):
+            with self.subTest(args=args):
+                self.env['PROBE_PROCESS_ARGS'] = args
+                self.assertNotEqual(self.api('status').returncode, 0)
+        self.env['PROBE_PROCESS_ARGS'] = f'python3 {server_args}'
+        self.env['PROBE_PROCESS_STATE'] = 'Z'
+        self.assertNotEqual(self.api('status').returncode, 0)
+
     def test_occupied_port_fails_and_cleans_process_record(self):
         # A healthy unrelated HTTP service must not satisfy this launcher's readiness.
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
