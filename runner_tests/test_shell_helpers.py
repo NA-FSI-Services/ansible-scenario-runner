@@ -38,6 +38,11 @@ class HelperTests(unittest.TestCase):
             return str(sock.getsockname()[1])
 
     def test_api_start_status_restart_stop(self):
+        server = self.harness / 'mock_api/server.py'
+        server.write_text(server.read_text().replace(
+            'from __future__ import annotations',
+            'from __future__ import annotations\nimport faulthandler\n'
+            'faulthandler.dump_traceback_later(3)'))
         self.env['MOCK_API_PORT'] = self.free_port()
         self.addCleanup(self.api, 'stop')
         for action in ('start', 'status', 'start', 'restart', 'stop', 'stop'):
@@ -46,7 +51,7 @@ class HelperTests(unittest.TestCase):
                 if result.returncode:
                     log = self.harness / 'mock_api/.mock_api.log'
                     server_output = log.read_text()[-6000:] if log.exists() else ''
-                    self.fail(result.stdout + result.stderr[-6000:] + server_output)
+                    self.fail(server_output + result.stdout + result.stderr[-1500:])
         self.assertNotEqual(self.api('status').returncode, 0)
         self.assertFalse((self.harness / 'mock_api/.mock_api.ready').exists())
 
