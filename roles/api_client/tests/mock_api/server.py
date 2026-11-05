@@ -9,6 +9,7 @@ import os
 import sys
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from typing import Any
 from urllib.parse import urlparse
 
@@ -16,6 +17,13 @@ HOST = os.environ.get("MOCK_API_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MOCK_API_PORT", "8765"))
 # Must match roles/api_client/tests/vault.example.yml → api_token
 EXPECTED_TOKEN = os.environ.get("MOCK_API_TOKEN", "demo-token")
+
+
+class MockHTTPServer(ThreadingHTTPServer):
+    def server_bind(self) -> None:
+        # HTTPServer's reverse DNS lookup can delay startup on macOS.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -80,7 +88,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--instance', default='')
     args = parser.parse_args()
-    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    httpd = MockHTTPServer((HOST, PORT), Handler)
     print(f"mock API listening on http://{HOST}:{PORT} (token from MOCK_API_TOKEN / default demo-token)", flush=True)
     try:
         ready_file = os.environ.get('MOCK_API_READY_FILE')

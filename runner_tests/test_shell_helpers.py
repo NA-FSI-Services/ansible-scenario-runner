@@ -24,13 +24,12 @@ class HelperTests(unittest.TestCase):
             self.env.pop(key, None)
         self.env['MOCK_API_HOST'] = '127.0.0.1'
 
-    def run_script(self, path, *args, trace=False):
-        command = ['bash', '-x'] if trace else ['bash']
-        return subprocess.run([*command, str(self.harness / path), *args],
+    def run_script(self, path, *args):
+        return subprocess.run(['bash', str(self.harness / path), *args],
                               env=self.env, capture_output=True, text=True, timeout=15)
 
     def api(self, action):
-        return self.run_script('mock_api/manage.sh', action, trace=True)
+        return self.run_script('mock_api/manage.sh', action)
 
     def free_port(self):
         with socket.socket() as sock:
@@ -38,11 +37,6 @@ class HelperTests(unittest.TestCase):
             return str(sock.getsockname()[1])
 
     def test_api_start_status_restart_stop(self):
-        server = self.harness / 'mock_api/server.py'
-        server.write_text(server.read_text().replace(
-            'from __future__ import annotations',
-            'from __future__ import annotations\nimport faulthandler\n'
-            'faulthandler.dump_traceback_later(3)'))
         self.env['MOCK_API_PORT'] = self.free_port()
         self.addCleanup(self.api, 'stop')
         for action in ('start', 'status', 'start', 'restart', 'stop', 'stop'):
@@ -50,10 +44,22 @@ class HelperTests(unittest.TestCase):
                 result = self.api(action)
                 if result.returncode:
                     log = self.harness / 'mock_api/.mock_api.log'
-                    server_output = log.read_text()[-6000:] if log.exists() else ''
-                    self.fail(server_output + result.stdout + result.stderr[-1500:])
+                    server_output = log.read_text()[-2000:] if log.exists() else ''
+                    self.fail(result.stdout + result.stderr + server_output)
         self.assertNotEqual(self.api('status').returncode, 0)
         self.assertFalse((self.harness / 'mock_api/.mock_api.ready').exists())
+
+    def test_api_bind_does_not_require_reverse_dns(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('mock_api_server', SOURCE / 'mock_api/server.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with patch('socket.getfqdn', side_effect=AssertionError('Reverse DNS must not delay startup')):
+            server = module.MockHTTPServer(('127.0.0.1', 0), module.Handler)
+        self.addCleanup(server.server_close)
+        self.assertEqual(server.server_name, '127.0.0.1')
+        self.assertEqual(server.server_port, server.socket.getsockname()[1])
 
     def test_stale_or_unrelated_pid_is_never_signalled(self):
         proc = subprocess.Popen(['sleep', '30'])

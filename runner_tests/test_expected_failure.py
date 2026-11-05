@@ -83,7 +83,7 @@ sys.exit(subprocess.call(command))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         module.EXPECTED_TOKEN = token
-        server = module.ThreadingHTTPServer(('127.0.0.1', 0), module.Handler)
+        server = module.MockHTTPServer(('127.0.0.1', 0), module.Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(thread.join)
